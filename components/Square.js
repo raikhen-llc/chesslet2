@@ -24,10 +24,10 @@ export default function Square({
       return "bg-[#c4b5fd]"; // Light purple for animation target
     }
     if (isDropTarget) {
-      return "bg-[#7ec8e3]"; // Light blue for drop target
+      return "bg-[#d8c8a8]"; // Subtle warm highlight for drop target
     }
     if (isSelected) {
-      return "bg-board-selected";
+      return "bg-[#e0d4a8]"; // Subtle golden tint for selected
     }
     return isLight ? "bg-board-light" : "bg-board-dark";
   };
@@ -43,6 +43,7 @@ export default function Square({
         transition-colors duration-150
         ${piece ? "cursor-grab active:cursor-grabbing" : ""}
         ${isAnimationTarget ? "animation-target-pulse" : ""}
+        touch-none select-none
       `}
     >
       {piece && <Piece piece={piece} />}

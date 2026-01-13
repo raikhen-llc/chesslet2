@@ -159,6 +159,7 @@ export default function Board({ board, onMove, disabled, animatingMove }) {
   const handleTouchStart = useCallback(
     (e, row, col) => {
       if (e.touches.length !== 1) return;
+      e.preventDefault(); // Prevent browser default touch behavior (scrolling, context menu)
       const touch = e.touches[0];
       handleDragStart(row, col, touch.clientX, touch.clientY);
     },

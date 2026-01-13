@@ -10,7 +10,7 @@ export default function Piece({ piece }) {
   if (!piece) return null;
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center">
+    <div className="absolute inset-0 flex items-center justify-center piece-enter">
       <img
         src={PIECE_IMAGES[piece]}
         alt={piece}

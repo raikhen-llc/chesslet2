@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+
 import Board from "./Board";
-import { HeaderWithNav } from "./Header";
+import { HeaderWithModeSelect } from "./Header";
 import { Toast, useToast } from "./Toast";
 import { CongratsModal, LevelCompleteModal } from "./Modal";
+import LevelSelectModal from "./LevelSelectModal";
 import { WinCelebration, ImpossibleOverlay } from "./GameOverlays";
 import { useGame, GAME_STATE } from "@/lib/useGame";
 import { createEmptyBoard } from "@/lib/constants";
+import { LEVELS } from "@/lib/levels";
 
 /**
  * Unified GamePage component that handles all game modes
@@ -17,8 +20,10 @@ import { createEmptyBoard } from "@/lib/constants";
  * @param {string} props.initialFen - Initial FEN for puzzle mode
  * @param {Object} props.levelData - Level data for campaign mode
  * @param {number} props.currentLevel - Current level number (campaign mode)
+ * @param {Set} props.completedLevels - Set of completed level numbers
  * @param {Function} props.onNextLevel - Callback for next level (campaign mode)
  * @param {Function} props.onLevelComplete - Callback when level completed (campaign mode)
+ * @param {Function} props.onSelectLevel - Callback when level selected from modal
  * @param {string} props.selectedDifficulty - Difficulty for random mode
  * @param {Function} props.onDifficultyChange - Callback for difficulty change (random mode)
  */
@@ -27,8 +32,10 @@ export default function GamePage({
   initialFen = null,
   levelData = null,
   currentLevel = 1,
+  completedLevels = new Set(),
   onNextLevel,
   onLevelComplete,
+  onSelectLevel,
   selectedDifficulty = "easy",
   onDifficultyChange,
   totalLevels = 100,
@@ -36,9 +43,11 @@ export default function GamePage({
 }) {
   const { toast, showToast } = useToast();
   const [showCongrats, setShowCongrats] = useState(false);
+  const [showLevelSelect, setShowLevelSelect] = useState(false);
   const [isPlayingSolution, setIsPlayingSolution] = useState(false);
   const [animatingMove, setAnimatingMove] = useState(null);
   const solutionTimeoutRef = useRef(null);
+  const usedSolutionRef = useRef(false);
 
   // For campaign mode, track when a level was just completed to avoid re-triggering
   const [completedLevelNumber, setCompletedLevelNumber] = useState(null);
@@ -51,11 +60,12 @@ export default function GamePage({
     gameState,
     moveHistory,
     difficulty,
+    puzzleInfo,
     makeMove,
     resetPuzzle,
     newPuzzle,
     getSolution,
-  } = useGame(fenToUse);
+  } = useGame(fenToUse, selectedDifficulty);
 
   // Keep a ref to the latest makeMove for solution playback
   const makeMoveRef = useRef(makeMove);
@@ -82,13 +92,14 @@ export default function GamePage({
     (targetDifficulty) => {
       newPuzzle(targetDifficulty || selectedDifficulty);
       setShowCongrats(false);
+      usedSolutionRef.current = false;
     },
     [newPuzzle, selectedDifficulty]
   );
 
-  // Show celebration on win
+  // Show celebration on win (but not when solution was used)
   useEffect(() => {
-    if (gameState === GAME_STATE.WON) {
+    if (gameState === GAME_STATE.WON && !usedSolutionRef.current) {
       if (mode === "levels") {
         // Campaign mode - only trigger once per level
         if (completedLevelNumber !== currentLevel) {
@@ -99,8 +110,6 @@ export default function GamePage({
       } else {
         setShowCongrats(true);
       }
-    } else if (gameState === GAME_STATE.STUCK) {
-      showToast("No valid moves left. Try undoing or reset!", "warning");
     }
   }, [
     gameState,
@@ -115,6 +124,7 @@ export default function GamePage({
   useEffect(() => {
     if (mode === "levels") {
       setCompletedLevelNumber(null);
+      usedSolutionRef.current = false;
     }
   }, [currentLevel, mode]);
 
@@ -135,6 +145,7 @@ export default function GamePage({
     resetPuzzle();
     setIsPlayingSolution(true);
     setShowCongrats(false);
+    usedSolutionRef.current = true;
 
     // Play each move with animation
     let moveIndex = 0;
@@ -180,59 +191,54 @@ export default function GamePage({
     onNextLevel?.();
   }, [onNextLevel]);
 
-  // Determine nav link based on mode
-  const getNavConfig = () => {
-    switch (mode) {
-      case "levels":
-        return { href: "/", label: "Random Mode" };
-      case "random":
-        return { href: "/", label: "← Home" };
-      case "puzzle":
-        return { href: "/", label: "← Home" };
-      default:
-        return { href: "/", label: "Home" };
-    }
-  };
+  // Handle level selection
+  const handleSelectLevel = useCallback(
+    (level) => {
+      onSelectLevel?.(level);
+      setShowLevelSelect(false);
+    },
+    [onSelectLevel]
+  );
 
-  const navConfig = getNavConfig();
+  // Calculate progress
+  const progressPercent =
+    mode === "levels" ? (completedLevels.size / totalLevels) * 100 : 0;
 
   return (
-    <div className="game-page">
-      {/* Header */}
-      <HeaderWithNav navHref={navConfig.href} navLabel={navConfig.label} />
+    <>
+      {/* Header with mode selector */}
+      <HeaderWithModeSelect />
 
-      {/* Mode-specific info section */}
-      {mode === "random" && (
-        <div className="info-section">
-          <div className="instructions-card">
-            <h2 className="instructions-title">Random Mode</h2>
-            <p className="instructions-text">
-              Capture pieces until only one remains!
-            </p>
+      {/* Campaign Mode Info */}
+      {mode === "levels" && (
+        <div className="level-header">
+          <button
+            className="level-badge"
+            onClick={() => setShowLevelSelect(true)}
+          >
+            <span className="level-number">Level {currentLevel}</span>
+            {levelData?.difficulty && (
+              <span
+                className={`level-difficulty difficulty-${levelData.difficulty}`}
+              >
+                {levelData.difficulty.replace(/-/g, " ")}
+              </span>
+            )}
+            <ChevronDownIcon />
+          </button>
+
+          {/* Progress Bar */}
+          <div className="progress-container">
+            <div className="progress-bar">
+              <div
+                className="progress-fill"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <span className="progress-text">
+              {completedLevels.size}/{totalLevels}
+            </span>
           </div>
-
-          <div className="difficulty-wrapper">
-            <label className="difficulty-label">Difficulty</label>
-            <select
-              value={selectedDifficulty}
-              onChange={(e) => onDifficultyChange?.(e.target.value)}
-              className="difficulty-select"
-            >
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
-        </div>
-      )}
-
-      {mode === "puzzle" && (
-        <div className="instructions-card instructions-card-centered">
-          <h2 className="instructions-title">How to play</h2>
-          <p className="instructions-text">
-            Capture your own pieces until there's only one remaining. Every move
-            must be a capture!
-          </p>
         </div>
       )}
 
@@ -247,7 +253,9 @@ export default function GamePage({
 
         {/* Overlays */}
         {gameState === GAME_STATE.IMPOSSIBLE && <ImpossibleOverlay />}
-        {gameState === GAME_STATE.WON && <WinCelebration />}
+        {gameState === GAME_STATE.WON && !usedSolutionRef.current && (
+          <WinCelebration />
+        )}
       </div>
 
       {/* Controls */}
@@ -261,6 +269,20 @@ export default function GamePage({
           Reset
         </button>
 
+        {mode !== "levels" && (
+          <button
+            className="btn"
+            onClick={handleShowSolution}
+            disabled={
+              gameState === GAME_STATE.IMPOSSIBLE ||
+              gameState === GAME_STATE.WON ||
+              isPlayingSolution
+            }
+          >
+            {isPlayingSolution ? "Playing..." : "Show Solution"}
+          </button>
+        )}
+
         {mode === "random" && (
           <button
             className="btn btn-primary"
@@ -273,26 +295,13 @@ export default function GamePage({
         )}
 
         {mode === "puzzle" && (
-          <>
-            <button
-              className="btn"
-              onClick={handleShowSolution}
-              disabled={
-                gameState === GAME_STATE.IMPOSSIBLE ||
-                gameState === GAME_STATE.WON ||
-                isPlayingSolution
-              }
-            >
-              {isPlayingSolution ? "Playing..." : "Show Solution"}
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={() => handleNewPuzzle(difficulty)}
-              disabled={isPlayingSolution}
-            >
-              Next Puzzle
-            </button>
-          </>
+          <button
+            className="btn btn-primary"
+            onClick={() => handleNewPuzzle(difficulty)}
+            disabled={isPlayingSolution}
+          >
+            Next Puzzle
+          </button>
         )}
 
         {mode === "levels" && (
@@ -316,6 +325,7 @@ export default function GamePage({
           onClose={closeCongrats}
           onNextLevel={handleNextLevel}
           moveCount={moveHistory.length}
+          solutionCount={puzzleInfo?.metrics?.solutionCount}
           levelNumber={completedLevelNumber}
           isLastLevel={isLastLevel}
         />
@@ -326,103 +336,178 @@ export default function GamePage({
           onClose={closeCongrats}
           onNextPuzzle={() => {
             closeCongrats();
-            handleNewPuzzle(mode === "puzzle" ? difficulty : selectedDifficulty);
+            handleNewPuzzle(
+              mode === "puzzle" ? difficulty : selectedDifficulty
+            );
           }}
           moveCount={moveHistory.length}
+          solutionCount={puzzleInfo?.metrics?.solutionCount}
         />
       )}
 
-      <style jsx>{`
-        .game-page {
-          width: 100%;
-          max-width: 480px;
-          display: flex;
-          flex-direction: column;
-          gap: 1.5rem;
-        }
+      {/* Level Select Modal */}
+      {showLevelSelect && (
+        <LevelSelectModal
+          levels={LEVELS}
+          currentLevel={currentLevel}
+          completedLevels={completedLevels}
+          onSelectLevel={handleSelectLevel}
+          onClose={() => setShowLevelSelect(false)}
+        />
+      )}
 
-        .info-section {
-          display: flex;
-          flex-direction: row;
-          gap: 1.25rem;
-          align-items: stretch;
-        }
-
-        .instructions-card {
-          flex: 1;
-          background: white;
-          border-radius: 12px;
-          padding: 1.25rem;
-          border: 1px solid var(--surface-200);
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-        }
-
-        .instructions-card-centered {
-          text-align: center;
-        }
-
-        .instructions-title {
-          font-size: 0.875rem;
-          font-weight: 600;
-          color: var(--surface-700);
-          margin-bottom: 0.5rem;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          font-family: "DM Sans", sans-serif;
-        }
-
-        .instructions-text {
-          font-size: 0.9375rem;
-          color: var(--surface-600);
-          line-height: 1.5;
-          margin: 0;
-        }
-
-        .difficulty-wrapper {
-          display: flex;
-          flex-direction: column;
-          justify-content: flex-end;
-          min-width: 130px;
-        }
-
-        .difficulty-label {
-          font-size: 0.75rem;
-          font-weight: 600;
-          color: var(--surface-500);
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-bottom: 0.5rem;
-        }
-
-        .difficulty-select {
-          width: 100%;
-        }
-
-        .board-section {
-          position: relative;
-          display: flex;
-          justify-content: center;
-        }
-
-        .controls {
-          display: flex;
-          gap: 0.75rem;
-          justify-content: center;
-          flex-wrap: wrap;
-        }
-
-        @media (max-width: 520px) {
-          .info-section {
-            flex-direction: column;
+      <style jsx>
+        {`
+          .level-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             gap: 1rem;
           }
 
-          .difficulty-wrapper {
-            width: 100%;
+          .level-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: white;
+            border: 1px solid var(--surface-200);
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            transition: all 0.15s;
           }
-        }
-      `}</style>
-    </div>
+
+          .level-badge:hover {
+            border-color: var(--accent-300);
+            background: var(--accent-50);
+          }
+
+          .level-number {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--surface-800);
+          }
+
+          .level-difficulty {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+          }
+
+          .difficulty-very-easy {
+            color: #15803d;
+            background: #dcfce7;
+          }
+
+          .difficulty-easy {
+            color: #0d9488;
+            background: #ccfbf1;
+          }
+
+          .difficulty-medium {
+            color: #b45309;
+            background: #fef3c7;
+          }
+
+          .difficulty-hard {
+            color: #dc2626;
+            background: #fee2e2;
+          }
+
+          .difficulty-very-hard {
+            color: #7c3aed;
+            background: #ede9fe;
+          }
+
+          .progress-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex: 1;
+            max-width: 200px;
+          }
+
+          .progress-bar {
+            flex: 1;
+            height: 8px;
+            background: var(--surface-200);
+            border-radius: 4px;
+            overflow: hidden;
+          }
+
+          .progress-fill {
+            height: 100%;
+            background: linear-gradient(
+              90deg,
+              var(--accent-400),
+              var(--accent-500)
+            );
+            border-radius: 4px;
+            transition: width 0.3s ease;
+          }
+
+          .progress-text {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--surface-600);
+            white-space: nowrap;
+          }
+
+          .instructions-card {
+            background: white;
+            border: 1px solid var(--surface-200);
+            border-radius: 12px;
+            padding: 1.25rem;
+          }
+
+          .instructions-card-centered {
+            text-align: center;
+          }
+
+          .instructions-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--surface-800);
+            margin: 0 0 0.5rem 0;
+          }
+
+          .instructions-text {
+            font-size: 0.9375rem;
+            color: var(--surface-600);
+            line-height: 1.5;
+            margin: 0;
+          }
+
+          .board-section {
+            position: relative;
+            display: flex;
+            justify-content: center;
+          }
+
+          .controls {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: center;
+            flex-wrap: wrap;
+          }
+
+          @media (max-width: 520px) {
+            .level-header {
+              flex-direction: column;
+              align-items: stretch;
+              gap: 0.75rem;
+            }
+
+            .progress-container {
+              max-width: none;
+            }
+          }
+        `}
+      </style>
+    </>
   );
 }
 
@@ -469,6 +554,20 @@ function ChevronRightIcon() {
       style={{ width: 18, height: 18, marginLeft: 6 }}
     >
       <path d="M9 18l6-6-6-6" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      style={{ width: 16, height: 16, color: "var(--surface-400)" }}
+    >
+      <path d="M6 9l6 6 6-6" />
     </svg>
   );
 }
